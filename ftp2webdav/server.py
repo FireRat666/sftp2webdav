@@ -6,10 +6,10 @@ import tempfile
 import threading
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Tuple
-from urllib.parse import urljoin
+from urllib.parse import unquote, urljoin
 
 import easywebdav2
 import paramiko
@@ -227,7 +227,8 @@ class SftpServerInterface(paramiko.SFTPServerInterface):
             )
             sftp_attributes = []
             for item in listing:
-                filename = os.path.basename(item.name)
+                name = item.name.rstrip('/')
+                filename = unquote(os.path.basename(name))
                 if not filename:
                     continue
                 attr = paramiko.SFTPAttributes()
@@ -240,6 +241,7 @@ class SftpServerInterface(paramiko.SFTPServerInterface):
                             try:
                                 # Attempt to parse RFC 1123 format, e.g., 'Fri, 21 Nov 2025 08:42:31 GMT'
                                 dt_obj = datetime.strptime(item.mtime, "%a, %d %b %Y %H:%M:%S %Z")
+                                dt_obj = dt_obj.replace(tzinfo=timezone.utc)
                             except ValueError:
                                 # Fallback to ISO 8601 format, e.g., '2025-11-21T08:42:31Z'
                                 mtime_str = item.mtime.replace("Z", "+00:00")
