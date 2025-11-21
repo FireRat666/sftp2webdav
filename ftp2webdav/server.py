@@ -344,6 +344,30 @@ class SftpServerInterface(paramiko.SFTPServerInterface):
             )
             return SFTP_FAILURE
 
+    def mkdir(self, path, attr):
+        logger.info(
+            f"[[[SFTP Interface]]] [[[ ENTRY mkdir ]]] path={path}, attr={attr} on ID: {id(self)}"
+        )
+        if not self.webdav_client:
+            logger.error("[[[SFTP Interface]]] mkdir() - No WebDAV client. Denying.")
+            return SFTP_PERMISSION_DENIED
+
+        remote_path = self._resolve_path(path)
+        logger.debug(f"[[[SFTP Interface]]] mkdir() - Remote path: {remote_path}")
+
+        try:
+            self.webdav_client.mkdir(remote_path)
+            logger.info(f"[[[SFTP Interface]]] Directory created: {remote_path}")
+            return SFTP_OK
+        except easywebdav2.OperationFailed as e:
+            logger.error(f"[[[SFTP Interface]]] mkdir() failed: {e}")
+            if e.actual_code == 405:  # Method Not Allowed (e.g., directory exists)
+                return SFTP_FAILURE # Or a more specific error
+            return SFTP_FAILURE
+        except Exception as e:
+            logger.error(f"[[[SFTP Interface]]] mkdir() unexpected error: {e}", exc_info=True)
+            return SFTP_FAILURE
+
     def stat(self, path):
         logger.info(
             f"[[[SFTP Interface]]] [[[ ENTRY stat ]]] path={path} on ID: {id(self)}"
