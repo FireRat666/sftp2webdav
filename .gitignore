@@ -16,3 +16,8 @@ __pycache__/
 
 # Poetry lock files
 poetry.lock
+
+# Other
+.gitattributes
+gemini.md
+host.key

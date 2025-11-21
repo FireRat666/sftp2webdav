@@ -73,6 +73,36 @@ target_dir: path/to/target/dir/
 - Target Directory Configuration (`target_dir`):
     - Specifies the path to the target directory on the WebDAV server where uploaded files should be stored.
 
+### Local Testing with a Self-Signed SSL Certificate
+
+When testing locally, you may encounter an SSL error: `[SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed: IP address mismatch`. This happens because the hostname you are connecting to (e.g., `127.0.0.1`) is not listed in the server's self-signed certificate.
+
+To fix this, you must generate a certificate that includes the correct hostnames in its Subject Alternative Name (SAN) field.
+
+1.  **Generate a new certificate** using the following `openssl` command. This will create a certificate valid for both `localhost` and `127.0.0.1`.
+
+    ```bash
+    openssl req -x509 -newkey rsa:4096 -sha256 -days 365 -nodes \
+      -keyout webdav.key -out webdav.crt \
+      -subj "/CN=localhost" -addext "subjectAltName = DNS:localhost,IP:127.0.0.1"
+    ```
+
+2.  **Configure your WebDAV server** (e.g., SFTPGo) to use the generated `webdav.key` and `webdav.crt` files.
+
+3.  **Update your `ftp2webdav` configuration** to point to the new certificate and use the correct hostname:
+
+    ```yaml
+    webdav:
+      host: localhost  # Or 127.0.0.1
+      port: 10443
+      protocol: https
+      path: "/"
+      # Point verify_ssl to your server's public certificate to trust it.
+      verify_ssl: /path/to/your/webdav.crt
+    ```
+
+This ensures the hostname in the config matches a name in the certificate, allowing the SSL verification to succeed.
+
 ## Usage
 
 Run the server:
@@ -80,6 +110,20 @@ Run the server:
 ```bash
 ftp2webdav
 ```
+
+### Running from a Local Build
+
+If you have cloned the repository and want to run the application from the source code, you can use `poetry`:
+
+```bash
+# Install dependencies
+poetry install
+
+# Run the application
+poetry run ftp2webdav
+```
+
+This will use the local source code instead of the version installed from PyPI.
 
 ### File Upload
 

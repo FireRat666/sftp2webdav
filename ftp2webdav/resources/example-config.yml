@@ -1,14 +1,47 @@
 ---
+# The type of connection to use. Can be 'ftp' or 'sftp'.
+type: ftp
+
 ftp:
   host: 127.0.0.1
   port: 21
+  # Optional:
+  # user: anonymous
+  # password: ""
+
+sftp:
+  host: 127.0.0.1
+  port: 22
+  user: user
+  # password or private_key must be provided
+  password: ""
+  # private_key: /path/to/private/key
+  # private_key_pass: "" # if private key is encrypted
 
 webdav:
   host: webdav.host
   port: 443
   protocol: https
-  path: uri/path/to/webdav/endpoint
-  verify_ssl: True
-  cert: /path/to/cert
+  path: uri/path/to/webdav/endpoint # The root path on your WebDAV server
 
-target_dir: path/to/target/dir/
+  # --- SSL Verification ---
+  # How to verify the WebDAV server's SSL certificate.
+  #
+  # - true: (Default) Verify against your system's trusted CAs. Use this for
+  #   servers with a valid, publicly trusted certificate (e.g., from Let's Encrypt).
+  #
+  # - false: Do NOT verify the certificate. This is insecure and should only
+  #   be used for testing with local servers that have a self-signed cert.
+  #
+  # - "/path/to/your/server.crt": To trust a specific self-signed certificate,
+  #   provide the full path to the server's public certificate file (.crt or .pem).
+  verify_ssl: true
+
+  # --- Client Certificate (Advanced) ---
+  # The 'cert' option is for client-side SSL authentication, where the server
+  # verifies the client's identity. This is not common.
+  # To use it, provide the path to a file containing both the client's
+  # certificate and private key.
+  # cert: /path/to/client-cert-and-key.pem
+
+target_dir: path/to/target/dir/ # The destination folder on the WebDAV server
