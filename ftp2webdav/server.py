@@ -368,6 +368,84 @@ class SftpServerInterface(paramiko.SFTPServerInterface):
             logger.error(f"[[[SFTP Interface]]] mkdir() unexpected error: {e}", exc_info=True)
             return SFTP_FAILURE
 
+    def rename(self, oldpath, newpath):
+        logger.info(
+            f"[[[SFTP Interface]]] [[[ ENTRY rename ]]] oldpath={oldpath}, newpath={newpath} on ID: {id(self)}"
+        )
+        if not self.webdav_client:
+            logger.error("[[[SFTP Interface]]] rename() - No WebDAV client. Denying.")
+            return SFTP_PERMISSION_DENIED
+
+        remote_oldpath = self._resolve_path(oldpath)
+        remote_newpath = self._resolve_path(newpath)
+        logger.debug(f"[[[SFTP Interface]]] rename() - From: {remote_oldpath}, To: {remote_newpath}")
+
+        try:
+            self.webdav_client.move(remote_oldpath, remote_newpath)
+            logger.info(f"[[[SFTP Interface]]] Renamed: {remote_oldpath} to {remote_newpath}")
+            return SFTP_OK
+        except easywebdav2.OperationFailed as e:
+            logger.error(f"[[[SFTP Interface]]] rename() failed: {e}")
+            if e.actual_code == 404:
+                return SFTP_NO_SUCH_FILE
+            return SFTP_FAILURE
+        except Exception as e:
+            logger.error(f"[[[SFTP Interface]]] rename() unexpected error: {e}", exc_info=True)
+            return SFTP_FAILURE
+
+    def remove(self, path):
+        logger.info(
+            f"[[[SFTP Interface]]] [[[ ENTRY remove ]]] path={path} on ID: {id(self)}"
+        )
+        if not self.webdav_client:
+            logger.error("[[[SFTP Interface]]] remove() - No WebDAV client. Denying.")
+            return SFTP_PERMISSION_DENIED
+
+        remote_path = self._resolve_path(path)
+        logger.debug(f"[[[SFTP Interface]]] remove() - Remote path: {remote_path}")
+
+        try:
+            self.webdav_client.delete(remote_path)
+            logger.info(f"[[[SFTP Interface]]] Removed: {remote_path}")
+            return SFTP_OK
+        except easywebdav2.OperationFailed as e:
+            logger.error(f"[[[SFTP Interface]]] remove() failed: {e}")
+            if e.actual_code == 404:
+                return SFTP_NO_SUCH_FILE
+            return SFTP_FAILURE
+        except Exception as e:
+            logger.error(f"[[[SFTP Interface]]] remove() unexpected error: {e}", exc_info=True)
+            return SFTP_FAILURE
+
+    def rmdir(self, path):
+        logger.info(
+            f"[[[SFTP Interface]]] [[[ ENTRY rmdir ]]] path={path} on ID: {id(self)}"
+        )
+        if not self.webdav_client:
+            logger.error("[[[SFTP Interface]]] rmdir() - No WebDAV client. Denying.")
+            return SFTP_PERMISSION_DENIED
+
+        remote_path = self._resolve_path(path)
+        logger.debug(f"[[[SFTP Interface]]] rmdir() - Remote path: {remote_path}")
+
+        try:
+            # easywebdav2's delete works for directories too
+            self.webdav_client.delete(remote_path)
+            logger.info(f"[[[SFTP Interface]]] Removed directory: {remote_path}")
+            return SFTP_OK
+        except easywebdav2.OperationFailed as e:
+            logger.error(f"[[[SFTP Interface]]] rmdir() failed: {e}")
+            if e.actual_code == 404:
+                return SFTP_NO_SUCH_FILE
+            # 409 Conflict could mean not empty
+            if e.actual_code == 409:
+                logger.warning(f"[[[SFTP Interface]]] rmdir() failed, directory likely not empty: {remote_path}")
+                return SFTP_FAILURE
+            return SFTP_FAILURE
+        except Exception as e:
+            logger.error(f"[[[SFTP Interface]]] rmdir() unexpected error: {e}", exc_info=True)
+            return SFTP_FAILURE
+
     def stat(self, path):
         logger.info(
             f"[[[SFTP Interface]]] [[[ ENTRY stat ]]] path={path} on ID: {id(self)}"
