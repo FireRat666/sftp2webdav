@@ -13,7 +13,7 @@ ftp2webdav = 'ftp2webdav.cli:app'
 python = "^3.13"
 cerberus = "^1.3.8"
 easywebdav2 = "^1.3.0"
-ftprelay = "^0.1"
+ftprelay = { path = "./ftprelay", develop = true } # Updated path to the local ftprelay directory
 paramiko = "^3.4.0"
 pyyaml = "^6.0"
 typer = {extras = ["all"], version = "^0.20.0"}

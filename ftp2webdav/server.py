@@ -35,16 +35,18 @@ class WebDAVFileUploader(FileProcessor):
     webdav_client: easywebdav2.Client
     target_dir: Path
 
-    def process_file(self, file: Path) -> None:
-        logger.debug(f"[[[WebDAVFileUploader]]] Processing file: {file}")
-        self.webdav_client.mkdirs(str(self.target_dir))
-        remote_path = str(self.target_dir / file.name)
+    def process_file(self, file: Path, remote_path: str) -> None:
+        logger.debug(f"[[[WebDAVFileUploader]]] process_file called for: {file}, remote_path: {remote_path}")
+        # Ensure the parent directories exist on WebDAV
+        remote_dir = posixpath.dirname(remote_path)
+        if remote_dir and remote_dir != "/": # Don't try to mkdir for root
+            self.webdav_client.mkdirs(remote_dir)
         self.webdav_client.upload(str(file), remote_path)
         logger.info(f"File '{file.name}' was uploaded successfully to '{remote_path}'.")
 
 
 @dataclass
-class WebDAVAuthenticator(Authenticator):
+class WebDAVAuthenticator: # Removed inheritance from Authenticator
     webdav_config: dict[str, Any]
     target_dir: Path
 
@@ -95,6 +97,7 @@ class FTPClientAuthenticator(Authenticator):
     def authenticate(
         self, username: str, password: str
     ) -> Tuple[FileProcessor, easywebdav2.Client]:
+        logger.debug(f"[[[FTPClientAuthenticator]]] authenticate(username={username}, password={'*' * len(password) if password else 'None'})")
         configured_user = self.ftp_config.get("user")
         configured_password = self.ftp_config.get("password")
 
@@ -112,7 +115,32 @@ class FTPClientAuthenticator(Authenticator):
 
         # WebDAV Client Authentication (ftp2webdav -> WebDAV Server)
         # Use the WebDAVAuthenticator to establish the connection to the WebDAV server
-        return self.webdav_authenticator.authenticate(username, password)
+        file_processor, webdav_client = self.webdav_authenticator.authenticate(username, password)
+        logger.debug(f"[[[FTPClientAuthenticator]]] authenticate returning file_processor: {file_processor}, webdav_client: {webdav_client}")
+        return file_processor, webdav_client
+
+    def get_perms(self, username):
+        """
+        Returns a string representing the permissions for the given username.
+        'e': change directory (CWD, CDUP)
+        'l': list directory (LIST, NLST)
+        'r': retrieve file from server (RETR)
+        'a': append data to a file (APPE)
+        'd': delete file or directory (DELE, RMD)
+        'f': rename file (RNFR, RNTO)
+        'w': store file to server (STOR)
+        'm': create directory (MKD)
+        """
+        perms = "elradfmw"
+        logger.debug(f"[[[FTPClientAuthenticator]]] get_perms(username={username}) returning: {perms}")
+        return perms
+
+    def get_home_dir(self, username):
+        """
+        Returns the virtual home directory for the FTP user.
+        The actual temporary local storage is handled by CustomAuthorizer.
+        """
+        return "/"
 
 
 @dataclass
@@ -174,6 +202,15 @@ class SFTPClientAuthenticator(Authenticator):
 
         # WebDAV Client Authentication (ftp2webdav -> WebDAV Server)
         return self.webdav_authenticator.authenticate(username, password)
+
+    def get_perms(self, username):
+        # SFTP permissions are handled differently, but for consistency with the Authenticator interface
+        return "elradfmw"
+
+    def get_home_dir(self, username):
+        # SFTP doesn't directly use a "home directory" in the same way FTP does for pyftpdlib's authorizer.
+        # This is a placeholder to satisfy the Authenticator interface.
+        return "/"
 
 
 class SftpFileHandle(paramiko.SFTPHandle):
@@ -438,7 +475,7 @@ class SftpServerInterface(paramiko.SFTPServerInterface):
 
     def mkdir(self, path, attr):
         logger.info(
-            f"[[[SFTP Interface]]] [[[ ENTRY mkdir ]]] path={path}, attr={attr} on ID: {id(self)}"
+            f"[[[SFTP Interface]]] [[[ ENTRY mkdir ]]] path={path} on ID: {id(self)}"
         )
         if not self.webdav_client:
             logger.error("[[[SFTP Interface]]] mkdir() - No WebDAV client. Denying.")
@@ -501,7 +538,6 @@ class SftpServerInterface(paramiko.SFTPServerInterface):
             logger.info(f"[[[SFTP Interface]]] Removed: {remote_path}")
             return SFTP_OK
         except easywebdav2.OperationFailed as e:
-            logger.error(f"[[[SFTP Interface]]] remove() failed: {e}")
             if e.actual_code == 404:
                 return SFTP_NO_SUCH_FILE
             return SFTP_FAILURE
@@ -526,7 +562,6 @@ class SftpServerInterface(paramiko.SFTPServerInterface):
             logger.info(f"[[[SFTP Interface]]] Removed directory: {remote_path}")
             return SFTP_OK
         except easywebdav2.OperationFailed as e:
-            logger.error(f"[[[SFTP Interface]]] rmdir() failed: {e}")
             if e.actual_code == 404:
                 return SFTP_NO_SUCH_FILE
             # 409 Conflict could mean not empty
@@ -603,7 +638,7 @@ class SftpServerInterface(paramiko.SFTPServerInterface):
                                 attr.st_mtime = int(item.mtime.timestamp())
                         except (ValueError, TypeError, OSError) as e:
                             logger.warning(
-                                f"Could not parse mtime '{item.mtime}' for '{basename}': {e}"
+                                f"Could not parse mtime '{item.mtime}' for '{filename}': {e}"
                             )
                     if item.contenttype == "httpd/unix-directory":
                         attr.st_mode = stat_module.S_IFDIR | 0o755
@@ -651,27 +686,6 @@ class SftpServerInterface(paramiko.SFTPServerInterface):
             return SFTP_OK
         logger.info(f"[[[SFTP Interface]]] [[[ EXIT extended ]]] on ID: {id(self)}")
         return SFTP_OP_UNSUPPORTED
-
-
-class SftpInterfaceWrapper:
-    def __init__(self, server, *args, **kwargs):
-        logger.critical("DIAGNOSTIC_WRAPPER: __init__ called.")
-        self.real_interface = SftpServerInterface(server, *args, **kwargs)
-        logger.critical(
-            f"DIAGNOSTIC_WRAPPER: Real interface created: ID={id(self.real_interface)}"
-        )
-        has_list_folder = hasattr(self.real_interface, "list_folder")
-        has_opendir = hasattr(self.real_interface, "opendir")
-        logger.critical(
-            f"DIAGNOSTIC_WRAPPER: hasattr(real_interface, 'list_folder') -> {has_list_folder}"
-        )
-        logger.critical(
-            f"DIAGNOSTIC_WRAPPER: hasattr(real_interface, 'opendir') -> {has_opendir}"
-        )
-
-    def __getattr__(self, name):
-        logger.critical(f"DIAGNOSTIC_WRAPPER: __getattr__ called for '{name}'")
-        return getattr(self.real_interface, name)
 
 
 class SftpAuthInterface(paramiko.ServerInterface):
@@ -766,10 +780,10 @@ class SFTPRelay:
             )
 
             transport.set_subsystem_handler(
-                "sftp", paramiko.SFTPServer, SftpInterfaceWrapper
+                "sftp", paramiko.SFTPServer, SftpServerInterface
             )
             logger.critical(
-                f"[[[SFTPRelay]]] [{peername}] SFTP subsystem handler set to SftpInterfaceWrapper."
+                f"[[[SFTPRelay]]] [{peername}] SFTP subsystem handler set to SftpServerInterface."
             )
 
             auth_interface = SftpAuthInterface(self.authenticator, transport)
@@ -859,7 +873,7 @@ class Server:
                 authenticator=ftp_client_authenticator,
                 host=ftp_config["host"],
                 port=ftp_config["port"],
-                handler=WebDAVFTPHandler,
+                handler_class=WebDAVFTPHandler,  # Pass WebDAVFTPHandler directly
             )
             logger.info("FTP relay server selected.")
         elif server_type == "sftp":
