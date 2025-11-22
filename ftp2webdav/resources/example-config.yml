@@ -24,6 +24,10 @@ webdav:
   protocol: https
   path: uri/path/to/webdav/endpoint # The root path on your WebDAV server
 
+  # WebDAV server authentication
+  user: webdav_user
+  password: webdav_password
+
   # --- SSL Verification ---
   # How to verify the WebDAV server's SSL certificate.
   #

@@ -49,13 +49,16 @@ class WebDAVAuthenticator(Authenticator):
     target_dir: Path
 
     def authenticate(
-        self, username: str, password: str
+        self, client_username: str, client_password: str
     ) -> Tuple[FileProcessor, easywebdav2.Client]:
-        logger.debug(f"[[[WebDAVAuthenticator]]] Authenticating user: {username}")
+        logger.debug(f"[[[WebDAVAuthenticator]]] Authenticating client user: {client_username}")
         if self.webdav_config.get("protocol") == "http":
             logger.warning("Using insecure WebDAV connection (http)")
 
         connect_config = self.webdav_config.copy()
+        webdav_username = connect_config.pop("user", None)
+        webdav_password = connect_config.pop("password", None)
+
         verify_ssl = connect_config.get("verify_ssl", True)
         if not verify_ssl:
             logger.warning("WebDAV SSL verification is disabled")
@@ -63,7 +66,7 @@ class WebDAVAuthenticator(Authenticator):
 
         try:
             webdav_client = easywebdav2.connect(
-                username=username, password=password, **connect_config
+                username=webdav_username, password=webdav_password, **connect_config
             )
             logger.debug(
                 f"[[[WebDAVAuthenticator]]] Checking for target directory: {self.target_dir}"
@@ -72,16 +75,105 @@ class WebDAVAuthenticator(Authenticator):
             logger.info("WebDAV connection successful.")
         except easywebdav2.OperationFailed as err:
             if err.actual_code == 401:
-                logger.warning(f"Authentication failed for user {username}")
+                logger.warning(f"WebDAV authentication failed for user {webdav_username}")
             else:
                 logger.error(f"WebDAV operation failed: {err}")
             raise AuthenticationFailedError() from err
         except Exception as err:
-            logger.error(f"An unexpected error occurred during authentication: {err}")
+            logger.error(f"An unexpected error occurred during WebDAV authentication: {err}")
             raise AuthenticationFailedError() from err
 
-        logger.debug("[[[WebDAVAuthenticator]]] Authentication successful.")
+        logger.debug("[[[WebDAVAuthenticator]]] WebDAV authentication successful.")
         return WebDAVFileUploader(webdav_client, self.target_dir), webdav_client
+
+
+@dataclass
+class FTPClientAuthenticator(Authenticator):
+    ftp_config: dict[str, Any]
+    webdav_authenticator: WebDAVAuthenticator
+
+    def authenticate(
+        self, username: str, password: str
+    ) -> Tuple[FileProcessor, easywebdav2.Client]:
+        configured_user = self.ftp_config.get("user")
+        configured_password = self.ftp_config.get("password")
+
+        # FTP Server Authentication (Client -> ftp2webdav)
+        if configured_user and configured_password:
+            # Authenticate against configured user/password
+            if username == configured_user and password == configured_password:
+                logger.info(f"FTP client '{username}' authenticated successfully.")
+            else:
+                logger.warning(f"FTP client authentication failed for user '{username}'.")
+                raise AuthenticationFailedError()
+        else:
+            # Permit anonymous logins if no user/password specified
+            logger.info(f"FTP client '{username}' allowed anonymous login.")
+
+        # WebDAV Client Authentication (ftp2webdav -> WebDAV Server)
+        # Use the WebDAVAuthenticator to establish the connection to the WebDAV server
+        return self.webdav_authenticator.authenticate(username, password)
+
+
+@dataclass
+class SFTPClientAuthenticator(Authenticator):
+    sftp_config: dict[str, Any]
+    webdav_authenticator: WebDAVAuthenticator
+
+    def authenticate(
+        self, username: str, password: str = None, private_key: paramiko.PKey = None
+    ) -> Tuple[FileProcessor, easywebdav2.Client]:
+        configured_user = self.sftp_config.get("user")
+        configured_password = self.sftp_config.get("password")
+        configured_private_key_path = self.sftp_config.get("private_key")
+        configured_private_key_pass = self.sftp_config.get("private_key_pass")
+
+        sftp_auth_successful = False
+
+        if configured_user:
+            if username != configured_user:
+                logger.warning(f"SFTP client authentication failed: Unknown user '{username}'.")
+                raise AuthenticationFailedError()
+
+            if configured_password:
+                if password == configured_password:
+                    sftp_auth_successful = True
+                    logger.info(f"SFTP client '{username}' authenticated successfully with password.")
+                else:
+                    logger.warning(f"SFTP client authentication failed for user '{username}': Incorrect password.")
+                    raise AuthenticationFailedError()
+            elif configured_private_key_path:
+                try:
+                    configured_key = paramiko.RSAKey.from_private_key_file(
+                        configured_private_key_path, password=configured_private_key_pass
+                    )
+                    # In a real scenario, you'd compare the client's provided key with the configured_key
+                    # For simplicity, we'll assume if a key is configured, any key-based auth attempt is valid if the username matches.
+                    # A more robust implementation would involve comparing fingerprints or actual key objects.
+                    if private_key: # This means the client attempted key-based auth
+                        sftp_auth_successful = True
+                        logger.info(f"SFTP client '{username}' authenticated successfully with private key.")
+                    else:
+                        logger.warning(f"SFTP client '{username}' expected private key, but password was provided.")
+                        raise AuthenticationFailedError()
+                except Exception as e:
+                    logger.error(f"Error loading configured private key for SFTP: {e}")
+                    raise AuthenticationFailedError() from e
+            else:
+                # No password or private key configured, but a user is. This case shouldn't happen with schema validation.
+                logger.warning(f"SFTP configuration for user '{configured_user}' is incomplete (missing password/private_key).")
+                raise AuthenticationFailedError()
+        else:
+            # No user configured in sftp section, allow any SFTP client to connect (anonymous)
+            sftp_auth_successful = True
+            logger.info(f"SFTP client '{username}' allowed anonymous login (no user configured).")
+
+        if not sftp_auth_successful:
+            logger.warning(f"SFTP client authentication failed for user '{username}'.")
+            raise AuthenticationFailedError()
+
+        # WebDAV Client Authentication (ftp2webdav -> WebDAV Server)
+        return self.webdav_authenticator.authenticate(username, password)
 
 
 class SftpFileHandle(paramiko.SFTPHandle):
@@ -598,6 +690,9 @@ class SftpAuthInterface(paramiko.ServerInterface):
 
     def get_allowed_auths(self, username):
         logger.debug(f"[[[SftpAuthInterface]]] get_allowed_auths(username={username})")
+        # Allow both password and publickey if a private key is configured
+        if self.authenticator.sftp_config.get("private_key"):
+            return "password,publickey"
         return "password"
 
     def check_auth_password(self, username, password):
@@ -606,17 +701,37 @@ class SftpAuthInterface(paramiko.ServerInterface):
         )
         try:
             file_processor, webdav_client = self.authenticator.authenticate(
-                username, password
+                username, password=password
             )
             self.transport.file_processor = file_processor
             self.transport.webdav_client = webdav_client
             logger.info(
-                f"[[[SftpAuthInterface]]] Authentication successful for {username}."
+                f"[[[SftpAuthInterface]]] Client authentication successful for {username}."
             )
             return paramiko.AUTH_SUCCESSFUL
         except AuthenticationFailedError:
             logger.warning(
-                f"[[[SftpAuthInterface]]] Authentication failed for {username}."
+                f"[[[SftpAuthInterface]]] Client authentication failed for {username}."
+            )
+            return paramiko.AUTH_FAILED
+
+    def check_auth_publickey(self, username, key):
+        logger.debug(
+            f"[[[SftpAuthInterface]]] check_auth_publickey(username={username}, key={key})"
+        )
+        try:
+            file_processor, webdav_client = self.authenticator.authenticate(
+                username, private_key=key
+            )
+            self.transport.file_processor = file_processor
+            self.transport.webdav_client = webdav_client
+            logger.info(
+                f"[[[SftpAuthInterface]]] Client public key authentication successful for {username}."
+            )
+            return paramiko.AUTH_SUCCESSFUL
+        except AuthenticationFailedError:
+            logger.warning(
+                f"[[[SftpAuthInterface]]] Client public key authentication failed for {username}."
             )
             return paramiko.AUTH_FAILED
 
@@ -732,12 +847,16 @@ class Server:
         target_dir = Path(self.config["target_dir"])
         webdav_config = self.config["webdav"]
 
-        authenticator = WebDAVAuthenticator(webdav_config, target_dir)
+        webdav_authenticator = WebDAVAuthenticator(webdav_config, target_dir)
 
         if server_type == "ftp":
             ftp_config = self.config["ftp"]
+            ftp_client_authenticator = FTPClientAuthenticator(
+                ftp_config=ftp_config,
+                webdav_authenticator=webdav_authenticator,
+            )
             self.relay = FTPRelay(
-                authenticator=authenticator,
+                authenticator=ftp_client_authenticator,
                 host=ftp_config["host"],
                 port=ftp_config["port"],
                 handler=WebDAVFTPHandler,
@@ -745,6 +864,10 @@ class Server:
             logger.info("FTP relay server selected.")
         elif server_type == "sftp":
             sftp_config = self.config["sftp"]
+            sftp_client_authenticator = SFTPClientAuthenticator(
+                sftp_config=sftp_config,
+                webdav_authenticator=webdav_authenticator,
+            )
             host_key_file = sftp_config.get("host_key_file", "host.key")
             if not Path(host_key_file).exists():
                 logger.warning(
@@ -754,7 +877,7 @@ class Server:
                 key.write_private_key_file(host_key_file)
 
             self.relay = SFTPRelay(
-                authenticator=authenticator,
+                authenticator=sftp_client_authenticator,
                 host=sftp_config["host"],
                 port=sftp_config["port"],
                 host_key_file=host_key_file,

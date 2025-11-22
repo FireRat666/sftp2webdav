@@ -69,6 +69,8 @@ _SCHEMA = {
                 "default": "https",
             },
             "path": {"type": "string"},
+            "user": {"type": "string", "required": False},
+            "password": {"type": "string", "required": False},
             "verify_ssl": {"type": ["boolean", "string"], "default": True},
             "cert": {"type": "string"},
         },
