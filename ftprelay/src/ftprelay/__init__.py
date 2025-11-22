@@ -61,6 +61,13 @@ class CustomAuthorizer(DummyAuthorizer):
         logger.debug(f"[[[CustomAuthorizer]]] validate_authentication for user: {username}")
         try:
             file_processor, webdav_client = self.authenticator.authenticate(username, password)
+            
+            # Add user to the authorizer if not already present
+            if not self.has_user(username):
+                home_dir = self.get_home_dir(username)
+                perms = self.authenticator.get_perms(username)
+                self.add_user(username, password, home_dir, perm=perms)
+
             # Attach the file_processor and webdav_client to the handler instance
             handler.file_processor = file_processor
             handler.webdav_client = webdav_client
@@ -73,7 +80,7 @@ class CustomAuthorizer(DummyAuthorizer):
             raise FTPAuthenticationFailed from e
 
     def has_user(self, username):
-        return True
+        return username in self.user_table
 
     def has_perm(self, username, perm, path=None):
         user_perms = self.authenticator.get_perms(username)
@@ -107,6 +114,7 @@ class FTPRelay:
             pass
 
         _RelayHandler.authorizer = authorizer
+        _RelayHandler.timeout = 1800
 
         self.server = FTPServer((host, port), _RelayHandler)
         logger.info(f"[[[FTPRelay]]] FTP server initialized on {host}:{port} with handler {handler_class.__name__}")

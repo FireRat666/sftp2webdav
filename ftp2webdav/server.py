@@ -34,15 +34,36 @@ logger = logging.getLogger(__name__)
 class WebDAVFileUploader(FileProcessor):
     webdav_client: easywebdav2.Client
     target_dir: Path
+    webdav_config: dict[str, Any]
 
     def process_file(self, file: Path, remote_path: str) -> None:
         logger.debug(f"[[[WebDAVFileUploader]]] process_file called for: {file}, remote_path: {remote_path}")
+        
+        # remote_path from ftp_handler is now the full path, no need to join
+        full_remote_path = remote_path
+        
         # Ensure the parent directories exist on WebDAV
-        remote_dir = posixpath.dirname(remote_path)
+        remote_dir = posixpath.dirname(full_remote_path)
         if remote_dir and remote_dir != "/": # Don't try to mkdir for root
             self.webdav_client.mkdirs(remote_dir)
-        self.webdav_client.upload(str(file), remote_path)
-        logger.info(f"File '{file.name}' was uploaded successfully to '{remote_path}'.")
+            
+        self.webdav_client.upload(str(file), full_remote_path)
+        logger.info(f"File '{file.name}' was uploaded successfully to '{full_remote_path}'.")
+
+    def copy(self):
+        """Create a copy of the file processor with a new WebDAV client instance."""
+        connect_config = self.webdav_config.copy()
+        webdav_username = connect_config.pop("user", None)
+        webdav_password = connect_config.pop("password", None)
+
+        new_client = easywebdav2.connect(
+            username=webdav_username, password=webdav_password, **connect_config
+        )
+        return WebDAVFileUploader(
+            webdav_client=new_client,
+            target_dir=self.target_dir,
+            webdav_config=self.webdav_config,
+        )
 
 
 @dataclass
@@ -86,7 +107,7 @@ class WebDAVAuthenticator: # Removed inheritance from Authenticator
             raise AuthenticationFailedError() from err
 
         logger.debug("[[[WebDAVAuthenticator]]] WebDAV authentication successful.")
-        return WebDAVFileUploader(webdav_client, self.target_dir), webdav_client
+        return WebDAVFileUploader(webdav_client, self.target_dir, self.webdav_config), webdav_client
 
 
 @dataclass
@@ -130,8 +151,9 @@ class FTPClientAuthenticator(Authenticator):
         'f': rename file (RNFR, RNTO)
         'w': store file to server (STOR)
         'm': create directory (MKD)
+        'T': modify file timestamp (MFMT)
         """
-        perms = "elradfmw"
+        perms = "elradfmwT"
         logger.debug(f"[[[FTPClientAuthenticator]]] get_perms(username={username}) returning: {perms}")
         return perms
 
@@ -222,10 +244,20 @@ class SftpFileHandle(paramiko.SFTPHandle):
         flags=0,
     ):
         super().__init__(flags)
+        self.flags = flags
         self.local_path = local_path
         self.server_interface = server_interface
         self.remote_path = remote_path
         logger.info(f"[[[SftpFileHandle]]] Created for remote path: {self.remote_path}")
+
+    def read(self, offset, length):
+        logger.info(f"[[[SftpFileHandle]]] read(offset={offset}, length={length})")
+        try:
+            self.file.seek(offset)
+            return self.file.read(length)
+        except Exception as e:
+            logger.error(f"[[[SftpFileHandle]]] read() failed: {e}")
+            return SFTP_FAILURE
 
     def write(self, offset, data):
         logger.info(
@@ -261,30 +293,39 @@ class SftpFileHandle(paramiko.SFTPHandle):
                     f"[[[SftpFileHandle]]] Removed {self.remote_path} from open files list."
                 )
 
-        logger.info(
-            f"SFTP file transfer finished for {self.local_path.name}. Uploading to WebDAV."
-        )
         try:
-            webdav_client = self.server_interface.webdav_client
-            if not webdav_client:
-                logger.error(
-                    f"[[[SftpFileHandle]]] WebDAV client not available for upload."
+            # Only upload if the file was opened for writing.
+            if self.flags & (os.O_WRONLY | os.O_RDWR):
+                logger.info(
+                    f"SFTP file transfer finished for {self.local_path.name}. Uploading to WebDAV."
                 )
-                return SFTP_FAILURE
+                webdav_client = self.server_interface.webdav_client
+                if not webdav_client:
+                    logger.error(
+                        f"[[[SftpFileHandle]]] WebDAV client not available for upload."
+                    )
+                    return SFTP_FAILURE
 
-            remote_dir = posixpath.dirname(self.remote_path)
-            webdav_client.mkdirs(remote_dir)
-            webdav_client.upload(str(self.local_path), self.remote_path)
-            logger.info(
-                f"File '{self.local_path.name}' was uploaded successfully to '{self.remote_path}'."
-            )
-
-            self.local_path.unlink()
+                remote_dir = posixpath.dirname(self.remote_path)
+                if remote_dir and remote_dir != '/':
+                    webdav_client.mkdirs(remote_dir)
+                webdav_client.upload(str(self.local_path), self.remote_path)
+                logger.info(
+                    f"File '{self.local_path.name}' was uploaded successfully to '{self.remote_path}'."
+                )
         except Exception as e:
             logger.error(
-                f"Failed to process or cleanup {self.local_path.name} after upload: {e}"
+                f"Failed to process {self.local_path.name} after transfer: {e}", exc_info=True
             )
-            return SFTP_FAILURE
+        finally:
+            # Cleanup the local temporary file
+            if self.local_path.exists():
+                try:
+                    self.local_path.unlink()
+                    logger.debug(f"Cleaned up temporary file: {self.local_path}")
+                except OSError as e:
+                    logger.error(f"Failed to clean up temporary file {self.local_path}: {e}")
+
         return SFTP_OK
 
 
@@ -298,6 +339,7 @@ class SftpServerInterface(paramiko.SFTPServerInterface):
         self.open_files_lock = threading.Lock()
         self.cwd = "/"
         logger.info(f"[[[SFTP Interface]]] [[[ INITIALIZED ]]] ID: {id(self)}")
+
 
     def session_started(self):
         logger.info(f"[[[SFTP Interface]]] [[[ SESSION STARTED ]]] ID: {id(self)}")
@@ -336,40 +378,22 @@ class SftpServerInterface(paramiko.SFTPServerInterface):
         logger.debug(f"[[[SFTP Interface]]] canonicalize resolved path: {remote_path}")
 
         if not self.webdav_client:
-            logger.error(
-                "[[[SFTP Interface]]] WebDAV client not available for canonicalize."
-            )
             return SFTP_FAILURE
 
         try:
-            # Attempt to list the path. If it's a directory, this will succeed.
-            # If it's a file or doesn't exist, it will raise OperationFailed.
+            # Check if it's a directory.
             self.webdav_client.ls(remote_path)
-
-            # Success means it's a directory.
             self.cwd = remote_path
-            logger.info(f"[[[SFTP Interface]]] CWD updated to {self.cwd}")
-            logger.info(
-                f"[[[SFTP Interface]]] [[[ EXIT canonicalize ]]] returning path {remote_path}"
-            )
+            logger.info(f"[[[SFTP Interface]]] CWD updated to {self.cwd} (directory found)")
             return remote_path
-
-        except easywebdav2.OperationFailed as e:
-            if e.actual_code == 404:  # Not Found
-                logger.warning(
-                    f"[[[SFTP Interface]]] canonicalize path not found: {remote_path}"
-                )
-            else:
-                # Any other failure (e.g., trying to ls a file) is treated as "not a directory".
-                logger.warning(
-                    f"[[[SFTP Interface]]] canonicalize path is not a directory: {remote_path} (error: {e})"
-                )
-            return SFTP_NO_SUCH_FILE
+        except easywebdav2.OperationFailed:
+            # Not a directory, or doesn't exist.
+            # For canonicalize, we just need to return the absolute path.
+            # The client will use stat() or open() to check for existence.
+            logger.debug(f"[[[SFTP Interface]]] canonicalize path is not a directory, returning as is: {remote_path}")
+            return remote_path
         except Exception as e:
-            logger.error(
-                f"[[[SFTP Interface]]] Unexpected error in canonicalize: {e}",
-                exc_info=True,
-            )
+            logger.error(f"[[[SFTP Interface]]] Unexpected error in canonicalize: {e}", exc_info=True)
             return SFTP_FAILURE
 
     def open(self, path, flags, attr):
@@ -381,23 +405,38 @@ class SftpServerInterface(paramiko.SFTPServerInterface):
             return SFTP_PERMISSION_DENIED
 
         remote_path = self._resolve_path(path)
-        local_path = self.temp_dir_path / Path(remote_path).name
+        # Use a unique name for the temporary file to avoid collisions
+        local_path = self.temp_dir_path / f"{Path(remote_path).name}-{time.time_ns()}"
         logger.debug(f"[[[SFTP Interface]]] open() - Local path: {local_path}")
 
+        # Determine file open mode from flags
         if flags & (os.O_WRONLY | os.O_RDWR):
             mode = "wb"
             if flags & os.O_APPEND:
                 mode = "ab"
         else:
-            logger.warning(
-                f"[[[SFTP Interface]]] open() - Unsupported flags {flags}. Denying."
-            )
-            return SFTP_OP_UNSUPPORTED
+            # If no write flags are set, assume read-only.
+            mode = "rb"
+        
+        logger.debug(f"[[[SFTP Interface]]] open() - Determined mode: '{mode}' from flags: {flags}")
 
         try:
+            local_path.parent.mkdir(parents=True, exist_ok=True)
+            if 'r' in mode:
+                # Check if it's a directory before trying to download
+                sftp_attrs = self.stat(path)
+                if isinstance(sftp_attrs, paramiko.SFTPAttributes) and stat_module.S_ISDIR(sftp_attrs.st_mode):
+                    logger.error(f"[[[SFTP Interface]]] open() - Attempted to open a directory for reading: {remote_path}")
+                    return SFTP_PERMISSION_DENIED
+                
+                logger.debug(f"[[[SFTP Interface]]] open() - Downloading {remote_path} to {local_path} for reading.")
+                self.webdav_client.download(remote_path, str(local_path))
+            
             f = open(local_path, mode)
-        except IOError as e:
-            logger.error(f"[[[SFTP Interface]]] open() failed to open local file: {e}")
+        except (IOError, easywebdav2.OperationFailed) as e:
+            logger.error(f"[[[SFTP Interface]]] open() failed to open/download local file: {e}", exc_info=True)
+            if local_path.exists():
+                local_path.unlink()
             return SFTP_FAILURE
 
         with self.open_files_lock:
@@ -419,20 +458,28 @@ class SftpServerInterface(paramiko.SFTPServerInterface):
             )
             return SFTP_FAILURE
 
-        try:
-            remote_path = self._resolve_path(path)
-            logger.info(f"[[[SFTP Interface]]] Listing WebDAV directory: {remote_path}")
+        remote_path = self._resolve_path(path)
+        logger.info(f"[[[SFTP Interface]]] Listing WebDAV directory: {remote_path}")
 
+        try:
             listing = self.webdav_client.ls(remote_path)
             logger.debug(
                 f"[[[SFTP Interface]]] WebDAV listing returned {len(listing)} items."
             )
+
+            req_path_norm = "/" + remote_path.strip("/")
             sftp_attributes = []
             for item in listing:
-                name = item.name.rstrip("/")
-                filename = unquote(os.path.basename(name))
+                item_path_norm = unquote(item.name).rstrip("/")
+                logger.debug(f"[[[SFTP Interface]]] list_folder processing item: '{item_path_norm}', comparing with '{req_path_norm}'")
+                if item_path_norm == req_path_norm:
+                    logger.debug(f"[[[SFTP Interface]]] list_folder skipping self-entry: '{item_path_norm}'")
+                    continue
+
+                filename = posixpath.basename(item_path_norm)
                 if not filename:
                     continue
+
                 attr = paramiko.SFTPAttributes()
                 attr.filename = filename
                 attr.st_size = item.size
@@ -441,13 +488,11 @@ class SftpServerInterface(paramiko.SFTPServerInterface):
                         if isinstance(item.mtime, str):
                             dt_obj = None
                             try:
-                                # Attempt to parse RFC 1123 format, e.g., 'Fri, 21 Nov 2025 08:42:31 GMT'
                                 dt_obj = datetime.strptime(
                                     item.mtime, "%a, %d %b %Y %H:%M:%S %Z"
                                 )
                                 dt_obj = dt_obj.replace(tzinfo=timezone.utc)
                             except ValueError:
-                                # Fallback to ISO 8601 format, e.g., '2025-11-21T08:42:31Z'
                                 mtime_str = item.mtime.replace("Z", "+00:00")
                                 dt_obj = datetime.fromisoformat(mtime_str)
                             attr.st_mtime = int(dt_obj.timestamp())
@@ -462,14 +507,22 @@ class SftpServerInterface(paramiko.SFTPServerInterface):
                 else:
                     attr.st_mode = stat_module.S_IFREG | 0o644
                 sftp_attributes.append(attr)
-                logger.debug(f"[[[SFTP Interface]]] list_folder item: {attr.filename}")
+                logger.debug(f"[[[SFTP Interface]]] list_folder item added: {attr.filename}")
             logger.info(
                 f"[[[SFTP Interface]]] [[[ EXIT list_folder ]]] returning {len(sftp_attributes)} items."
             )
             return sftp_attributes
-        except Exception as e:
+        except easywebdav2.OperationFailed as e:
+            if e.actual_code == 404:
+                logger.warning(f"[[[SFTP Interface]]] Directory not found on WebDAV: {remote_path}. Returning empty list.")
+                return []
             logger.error(
                 f"[[[SFTP Interface]]] Error listing directory: {e}", exc_info=True
+            )
+            return SFTP_FAILURE
+        except Exception as e:
+            logger.error(
+                f"[[[SFTP Interface]]] Unexpected error in list_folder: {e}", exc_info=True
             )
             return SFTP_FAILURE
 
@@ -669,6 +722,13 @@ class SftpServerInterface(paramiko.SFTPServerInterface):
         result = self.stat(path)
         logger.info(f"[[[SFTP Interface]]] [[[ EXIT lstat ]]] on ID: {id(self)}")
         return result
+    
+    def chattr(self, path, attr):
+        logger.info(f"[[[SFTP Interface]]] [[[ ENTRY chattr ]]] path={path}, attr={attr} on ID: {id(self)}")
+        # The underlying WebDAV server may not support setting these attributes.
+        # For now, we'll log the attempt and return SFTP_OK to prevent client errors.
+        logger.warning(f"Attempted to set attributes on {path}, but this is not supported. Attrs: {attr.__dict__}")
+        return SFTP_OK
 
     def fsetstat(self, handle, attr):
         logger.info(
@@ -782,7 +842,7 @@ class SFTPRelay:
             transport.set_subsystem_handler(
                 "sftp", paramiko.SFTPServer, SftpServerInterface
             )
-            logger.critical(
+            logger.info(
                 f"[[[SFTPRelay]]] [{peername}] SFTP subsystem handler set to SftpServerInterface."
             )
 
