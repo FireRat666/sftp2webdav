@@ -15,10 +15,10 @@
 ## Features
 
 *   **Dual Protocol Support:** Acts as an FTP or SFTP server.
-*   **Seamless Authentication:** FTP/SFTP user authentication seamlessly validates against the WebDAV server.
+*   **Flexible Authentication:** Authenticates FTP/SFTP clients against credentials configured in the YAML file, while using separate credentials to connect to the WebDAV server.
+*   **Full-Featured File Management:** Supports subdirectories, file renaming, directory creation, and deletion.
 *   **Lightweight and Fast:** Built on `pyftpdlib` for FTP and `paramiko` for SFTP.
 *   **Easy YAML Configuration:** Simple and clear configuration for all server types.
-*   **Subdirectory Support:** Create and navigate subdirectories on the remote WebDAV server.
 
 ## Installation
 
@@ -141,4 +141,4 @@ automatically stored in the directory specified in the config file.
 
 ## License
 
-`ftp2webdav` is distributed under the terms of the MIT License.
+`sftp2webdav` is distributed under the terms of the MIT License.
