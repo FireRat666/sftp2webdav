@@ -1,13 +1,13 @@
 [tool.poetry]
-name = "ftp2webdav"
-version = "0.1.1"
-description = "An FTP server that forwards uploaded files to a WebDAV server"
-authors = ["Tomas Bayer <mail@tomas.berlin>"]
+name = "sftp2webdav"
+version = "0.1.2"
+description = "An SFTP/FTP server that forwards uploaded files to a WebDAV server"
+authors = ["Fire Rat <sftp@firer.at>","Tomas Bayer <mail@tomas.berlin>"]
 readme = "README.md"
 license = "MIT"
 
 [tool.poetry.scripts]
-ftp2webdav = 'ftp2webdav.cli:app'
+sftp2webdav = 'sftp2webdav.cli:app'
 
 [tool.poetry.dependencies]
 python = "^3.13"

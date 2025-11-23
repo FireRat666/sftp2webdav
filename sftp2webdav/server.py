@@ -122,7 +122,7 @@ class FTPClientAuthenticator(Authenticator):
         configured_user = self.ftp_config.get("user")
         configured_password = self.ftp_config.get("password")
 
-        # FTP Server Authentication (Client -> ftp2webdav)
+        # FTP Server Authentication (Client -> sftp2webdav)
         if configured_user and configured_password:
             # Authenticate against configured user/password
             if username == configured_user and password == configured_password:
@@ -134,7 +134,7 @@ class FTPClientAuthenticator(Authenticator):
             # Permit anonymous logins if no user/password specified
             logger.info(f"FTP client '{username}' allowed anonymous login.")
 
-        # WebDAV Client Authentication (ftp2webdav -> WebDAV Server)
+        # WebDAV Client Authentication (sftp2webdav -> WebDAV Server)
         # Use the WebDAVAuthenticator to establish the connection to the WebDAV server
         file_processor, webdav_client = self.webdav_authenticator.authenticate(username, password)
         logger.debug(f"[[[FTPClientAuthenticator]]] authenticate returning file_processor: {file_processor}, webdav_client: {webdav_client}")
@@ -222,7 +222,7 @@ class SFTPClientAuthenticator(Authenticator):
             logger.warning(f"SFTP client authentication failed for user '{username}'.")
             raise AuthenticationFailedError()
 
-        # WebDAV Client Authentication (ftp2webdav -> WebDAV Server)
+        # WebDAV Client Authentication (sftp2webdav -> WebDAV Server)
         return self.webdav_authenticator.authenticate(username, password)
 
     def get_perms(self, username):
@@ -333,7 +333,7 @@ class SftpServerInterface(paramiko.SFTPServerInterface):
     def __init__(self, server, *args, **kwargs):
         super().__init__(server, *args, **kwargs)
         self.transport = server.transport
-        self._temp_dir = tempfile.TemporaryDirectory(prefix="ftp2webdav-sftp-")
+        self._temp_dir = tempfile.TemporaryDirectory(prefix="sftp2webdav-sftp-")
         self.temp_dir_path = Path(self._temp_dir.name)
         self.open_files = {}
         self.open_files_lock = threading.Lock()

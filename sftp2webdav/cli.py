@@ -8,14 +8,14 @@ import typer
 import yaml
 from click import ClickException
 
-from ftp2webdav.config import build_configuration
-from ftp2webdav.server import Server
+from sftp2webdav.config import build_configuration
+from sftp2webdav.server import Server
 
 app = typer.Typer()
 
 DEFAULT_CONFIG_FILE_PATHS = (
-    Path("~/.ftp2webdav.conf").expanduser(),
-    Path("/etc/ftp2webdav.conf"),
+    Path("~/.sftp2webdav.conf").expanduser(),
+    Path("/etc/sftp2webdav.conf"),
 )
 
 
@@ -76,7 +76,7 @@ def run(
         else:
             with DEFAULT_CONFIG_FILE_PATHS[0].open("wb") as fh:
                 fh.write(
-                    importlib.resources.files("ftp2webdav")
+                    importlib.resources.files("sftp2webdav")
                     .joinpath("resources/example-config.yml")
                     .read_bytes()
                 )

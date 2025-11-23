@@ -1,8 +1,8 @@
-# ftp2webdav
+# sftp2webdav
 
-`ftp2webdav` is a versatile server that accepts file uploads via FTP or SFTP and forwards them to a WebDAV server. It was developed with the specific goal of retrofitting a [Nextcloud](https://nextcloud.com/) interface into older devices or software that exclusively support FTP or SFTP for file transfer.
+`sftp2webdav` is a versatile server that accepts file uploads via FTP or SFTP and forwards them to a WebDAV server. It was developed with the specific goal of retrofitting a [Nextcloud](https://nextcloud.com/) interface into older devices or software that exclusively support FTP or SFTP for file transfer.
 
-**Caution:** `ftp2webdav` has not undergone security testing. Avoid exposing it to untrusted networks or the public internet without implementing proper security measures.
+**Caution:** `sftp2webdav` has not undergone security testing. Avoid exposing it to untrusted networks or the public internet without implementing proper security measures.
 
 ## Quick Navigation
 
@@ -37,10 +37,10 @@ Currently, this version of the project must be installed from source.
 
 ## Configuration
 
-To configure `ftp2webdav`, a configuration file is required. By default, the program looks for it in `~/.ftp2webdav.conf` or `/etc/ftp2webdav`. Create a sample configuration file with:
+To configure `sftp2webdav`, a configuration file is required. By default, the program looks for it in `~/.sftp2webdav.conf` or `/etc/sftp2webdav`. Create a sample configuration file with:
 
 ```bash
-poetry run ftp2webdav --create-example-config
+poetry run sftp2webdav --create-example-config
 ```
 
 ### Example Configuration File
@@ -112,7 +112,7 @@ To fix this, you must generate a certificate that includes the correct hostnames
 
 2.  **Configure your WebDAV server** (e.g., SFTPGo) to use the generated `webdav.key` and `webdav.crt` files.
 
-3.  **Update your `ftp2webdav` configuration** to point to the new certificate and use the correct hostname:
+3.  **Update your `sftp2webdav` configuration** to point to the new certificate and use the correct hostname:
 
     ```yaml
     webdav:
@@ -131,12 +131,12 @@ This ensures the hostname in the config matches a name in the certificate, allow
 Run the server using Poetry:
 
 ```bash
-poetry run ftp2webdav
+poetry run sftp2webdav
 ```
 
 ### File Upload
 
-Log into the server using valid user credentials of the WebDAV sever, and then upload a file. The uploaded file will be
+Log into the server using valid user credentials, and then upload a file. The uploaded file will be
 automatically stored in the directory specified in the config file.
 
 ## License
