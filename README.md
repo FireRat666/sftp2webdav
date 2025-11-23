@@ -2,13 +2,9 @@
 
 [![PyPI - Version](https://img.shields.io/pypi/v/ftp2webdav)](https://pypi.org/project/ftp2webdav/)
 
+`ftp2webdav` is a versatile server that accepts file uploads via FTP or SFTP and forwards them to a WebDAV server. It was developed with the specific goal of retrofitting a [Nextcloud](https://nextcloud.com/) interface into older devices or software that exclusively support FTP or SFTP for file transfer.
 
-`ftp2webdav` is an FTP server that forwards all uploaded files to a WebDAV server.
-It was developed with the specific goal of retrofitting a [Nextcloud](https://nextcloud.com/) interface into older
-devices or software that exclusively support FTP upload for file transfer.
-
-**Caution:** `ftp2webdav` has not undergone security testing. Avoid exposing it to untrusted networks or the public
-internet without implementing proper security measures.
+**Caution:** `ftp2webdav` has not undergone security testing. Avoid exposing it to untrusted networks or the public internet without implementing proper security measures.
 
 ## Quick Navigation
 
@@ -20,58 +16,87 @@ internet without implementing proper security measures.
 
 ## Features
 
-* FTP user authentication seamlessly validates against the WebDAV server
-* Lightweight and fast (uses `pyftpdlib` underneath)
-* Easy YAML configuration
+*   **Dual Protocol Support:** Acts as an FTP or SFTP server.
+*   **Seamless Authentication:** FTP/SFTP user authentication seamlessly validates against the WebDAV server.
+*   **Lightweight and Fast:** Built on `pyftpdlib` for FTP and `paramiko` for SFTP.
+*   **Easy YAML Configuration:** Simple and clear configuration for all server types.
+*   **Subdirectory Support:** Create and navigate subdirectories on the remote WebDAV server.
 
 ## Installation
 
-Requires Python version 3.9 or higher and pip.
+Currently, this version of the project must be installed from source.
 
-```bash
-pip install ftp2webdav
-```
+1.  **Clone the repository:**
+    ```bash
+    git clone https://github.com/your-username/sftp2webdav.git
+    cd sftp2webdav
+    ```
+
+2.  **Install dependencies using Poetry:**
+    ```bash
+    poetry install
+    ```
 
 ## Configuration
 
-To configure `ftp2webdav`, a configuration file is required. By default, the program looks for it
-in `~/.ftp2webdav.conf` or `/etc/ftp2webdav`. Create a sample configuration file with:
+To configure `ftp2webdav`, a configuration file is required. By default, the program looks for it in `~/.ftp2webdav.conf` or `/etc/ftp2webdav`. Create a sample configuration file with:
 
 ```bash
-ftp2webdav --create-example-config
+poetry run ftp2webdav --create-example-config
 ```
 
 ### Example Configuration File
 
 ```yaml
 ---
+# Server type: 'ftp' or 'sftp'
+type: sftp
+
 ftp:
   host: 127.0.0.1
   port: 21
+  # Optional: Define a user and password for the FTP server itself.
+  # If not provided, anonymous logins are allowed, but WebDAV credentials are still required.
+  # user: "myftpuser"
+  # password: "myftppassword"
+
+sftp:
+  host: 127.0.0.1
+  port: 2023
+  host_key_file: "host.key" # Path to the server's private SSH host key.
+  # Optional: Define credentials for clients connecting to this SFTP server.
+  # If not provided, anonymous logins are allowed, but WebDAV credentials are still required.
+  # user: "mysftpuser"
+  # password: "mysftppassword"
+  # private_key: "/path/to/client_auth.key"
+  # private_key_pass: "key-password"
 
 webdav:
   host: webdav.host
   port: 443
   protocol: https
   path: uri/path/to/webdav/endpoint
+  # Optional: Credentials for the WebDAV server.
+  # user: "mywebdavuser"
+  # password: "mywebdavpassword"
   verify_ssl: True
   cert: /path/to/cert
 
 target_dir: path/to/target/dir/
 ```
 
-- FTP server configuration (`ftp`):
-    - `host`: Specifies the FTP server's IP address or hostname.
-    - `port`: Specifies the FTP server's port.
-- WebDAV Server configuration (`webdav`):
-    - `host`: Specifies the hostname or IP address of the WebDAV server.
-    - `port`: Specifies the port of the WebDAV server.
-    - `protocol`: Specifies the protocol used for WebDAV communication.
-    - `path`: Defines the URI path to the WebDAV endpoint.
-    - `verify_ssl`: Boolean indicating whether to verify SSL certificates.
-    - `cert`: Path to the (local) SSL certificate used for secure communication.
-- Target Directory Configuration (`target_dir`):
-    - Specifies the path to the target directory on the WebDAV server where uploaded files should be stored.
+-   **Server Type (`type`):** Choose between `ftp` and `sftp`.
+-   **FTP/SFTP Configuration (`ftp`/`sftp`):**
+    -   `host`: The IP address or hostname for the server to listen on.
+    -   `port`: The port for the server to listen on.
+    -   `host_key_file`: (**SFTP only**) Path to the server's private SSH key. If the file doesn't exist, a new one will be generated.
+    -   `user`/`password`/`private_key`/`private_key_pass`: (**Optional**) Credentials that clients must use to authenticate to this relay server. If not set, anonymous connections are allowed, but clients must still provide valid WebDAV credentials to complete the login.
+-   **WebDAV Server Configuration (`webdav`):**
+    -   `host`, `port`, `protocol`, `path`: Standard WebDAV connection details.
+    -   `user`/`password`: (Optional) Credentials for the WebDAV server.
+    -   `verify_ssl`: Can be `True`, `False`, or a path to a CA bundle.
+    -   `cert`: Path to a client-side certificate for authentication.
+-   **Target Directory (`target_dir`):** The root directory on the WebDAV server where files will be uploaded.
 
 ### Local Testing with a Self-Signed SSL Certificate
 
@@ -105,37 +130,16 @@ This ensures the hostname in the config matches a name in the certificate, allow
 
 ## Usage
 
-Run the server:
+Run the server using Poetry:
 
 ```bash
-ftp2webdav
-```
-
-### Running from a Local Build
-
-If you have cloned the repository and want to run the application from the source code, you can use `poetry`:
-
-```bash
-# Install dependencies
-poetry install
-
-# Run the application
 poetry run ftp2webdav
 ```
-
-This will use the local source code instead of the version installed from PyPI.
 
 ### File Upload
 
 Log into the server using valid user credentials of the WebDAV sever, and then upload a file. The uploaded file will be
 automatically stored in the directory specified in the config file.
-
-### Caveats
-
-- There are no subfolders on the FTP server, nor does it allow the creation of any. Thus, all files must be directly
-  uploaded to the root directory.
-- Using interactive FTP browsers to access the server may result in errors, as they are restricted from reading the
-  contents of the root directory.
 
 ## License
 
