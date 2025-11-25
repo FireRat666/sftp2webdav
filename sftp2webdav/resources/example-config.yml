@@ -3,14 +3,20 @@
 type: ftp
 
 ftp:
-  host: 127.0.0.1
+  # If true, the server will listen on all network interfaces (0.0.0.0),
+  # allowing other devices on your local network to connect.
+  # If false, it will only listen on localhost (127.0.0.1).
+  allow_remote: false
   port: 21
   # Optional:
   # user: anonymous
   # password: ""
 
 sftp:
-  host: 127.0.0.1
+  # If true, the server will listen on all network interfaces (0.0.0.0),
+  # allowing other devices on your local network to connect.
+  # If false, it will only listen on localhost (127.0.0.1).
+  allow_remote: false
   port: 22
   user: user
   # password or private_key must be provided

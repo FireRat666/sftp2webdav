@@ -21,7 +21,6 @@ _SCHEMA = {
     "ftp": {
         "type": "dict",
         "schema": {
-            "host": {"type": "string", "default": "127.0.0.1"},
             "port": {
                 "type": "integer",
                 "coerce": int,
@@ -31,6 +30,7 @@ _SCHEMA = {
             },
             "user": {"type": "string", "default": "anonymous"},
             "password": {"type": "string", "default": ""},
+            "allow_remote": {"type": "boolean", "default": False},
         },
         "default": {},
     },
@@ -38,7 +38,6 @@ _SCHEMA = {
         "type": "dict",
         "check_with": "sftp_auth",
         "schema": {
-            "host": {"type": "string", "default": "127.0.0.1"},
             "port": {
                 "type": "integer",
                 "coerce": int,
@@ -54,6 +53,7 @@ _SCHEMA = {
                 "required": False,
                 "dependencies": "private_key",
             },
+            "allow_remote": {"type": "boolean", "default": False},
         },
         "default": {},
     },

@@ -925,19 +925,21 @@ class Server:
 
         if server_type == "ftp":
             ftp_config = self.config["ftp"]
+            host = "0.0.0.0" if ftp_config.get("allow_remote") else "127.0.0.1"
             ftp_client_authenticator = FTPClientAuthenticator(
                 ftp_config=ftp_config,
                 webdav_authenticator=webdav_authenticator,
             )
             self.relay = FTPRelay(
                 authenticator=ftp_client_authenticator,
-                host=ftp_config["host"],
+                host=host,
                 port=ftp_config["port"],
-                handler_class=WebDAVFTPHandler,  # Pass WebDAVFTPHandler directly
+                handler_class=WebDAVFTPHandler,
             )
             logger.info("FTP relay server selected.")
         elif server_type == "sftp":
             sftp_config = self.config["sftp"]
+            host = "0.0.0.0" if sftp_config.get("allow_remote") else "127.0.0.1"
             sftp_client_authenticator = SFTPClientAuthenticator(
                 sftp_config=sftp_config,
                 webdav_authenticator=webdav_authenticator,
@@ -952,7 +954,7 @@ class Server:
 
             self.relay = SFTPRelay(
                 authenticator=sftp_client_authenticator,
-                host=sftp_config["host"],
+                host=host,
                 port=sftp_config["port"],
                 host_key_file=host_key_file,
             )

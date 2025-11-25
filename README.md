@@ -51,7 +51,10 @@ poetry run sftp2webdav --create-example-config
 type: sftp
 
 ftp:
-  host: 127.0.0.1
+  # If true, the server will listen on all network interfaces (0.0.0.0),
+  # allowing other devices on your local network to connect.
+  # If false, it will only listen on localhost (127.0.0.1).
+  allow_remote: false
   port: 21
   # Optional: Define a user and password for the FTP server itself.
   # If not provided, anonymous logins are allowed, but WebDAV credentials are still required.
@@ -59,7 +62,7 @@ ftp:
   # password: "myftppassword"
 
 sftp:
-  host: 127.0.0.1
+  allow_remote: false
   port: 2023
   host_key_file: "host.key" # Path to the server's private SSH host key.
   # Optional: Define credentials for clients connecting to this SFTP server.
@@ -85,7 +88,7 @@ target_dir: path/to/target/dir/
 
 -   **Server Type (`type`):** Choose between `ftp` and `sftp`.
 -   **FTP/SFTP Configuration (`ftp`/`sftp`):**
-    -   `host`: The IP address or hostname for the server to listen on.
+    -   `allow_remote`: If `true`, the server listens on all network interfaces (`0.0.0.0`), allowing connections from other devices on the local network. If `false`, it only listens on `127.0.0.1` (localhost).
     -   `port`: The port for the server to listen on.
     -   `host_key_file`: (**SFTP only**) Path to the server's private SSH key. If the file doesn't exist, a new one will be generated.
     -   `user`/`password`/`private_key`/`private_key_pass`: (**Optional**) Credentials that clients must use to authenticate to this relay server. If not set, anonymous connections are allowed, but clients must still provide valid WebDAV credentials to complete the login.

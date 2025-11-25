@@ -101,7 +101,7 @@ class CustomAuthorizer(DummyAuthorizer):
 
 
 class FTPRelay:
-    def __init__(self, authenticator: Authenticator, host: str, port: int, handler_class: type[FTPHandler], allow_anonymous: bool = False):
+    def __init__(self, authenticator: Authenticator, host: str, port: int, handler_class: type[FTPHandler]):
         print(f"DEBUG: FTPRelay __init__ called from: {__file__}")
         self._temp_dir = tempfile.TemporaryDirectory(prefix="ftp2webdav-ftp-")
         self.temp_dir_path = Path(self._temp_dir.name)
